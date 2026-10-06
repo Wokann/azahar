@@ -128,7 +128,7 @@ std::vector<u8> Ticket::Serialize() const {
 
     ret.insert(ret.end(), ticket_signature.begin(), ticket_signature.end());
 
-    u32 padding = 0x40 - (ret.size() % 0x40);
+    const std::size_t padding = Common::AlignUp(ret.size(), 0x40) - ret.size();
     ret.insert(ret.end(), padding, 0);
 
     std::span<const u8> body_span{reinterpret_cast<const u8*>(&ticket_body),

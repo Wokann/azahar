@@ -112,7 +112,7 @@ AM_NET::AM_NET(std::shared_ptr<Module> am) : Module::Interface(std::move(am), "a
         {0x081E, &AM_NET::GetTicketIdList, "GetTicketIdList"},
         {0x081F, &AM_NET::GetNumTicketsOfProgram, "GetNumTicketsOfProgram"},
         {0x0820, &AM_NET::ListTicketInfos, "ListTicketInfos"},
-        {0x0821, nullptr, "GetRightsOnlyTicketData"},
+        {0x0821, &AM_NET::GetRightsOnlyTicketData, "GetRightsOnlyTicketData"},
         {0x0822, &AM_NET::GetNumCurrentContentInfos, "GetNumCurrentContentInfos"},
         {0x0823, &AM_NET::FindCurrentContentInfos, "FindCurrentContentInfos"},
         {0x0824, &AM_NET::ListCurrentContentInfos, "ListCurrentContentInfos"},

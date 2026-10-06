@@ -4,7 +4,9 @@ add_executable(tests
     common/param_package.cpp
     core/core_timing.cpp
     core/file_sys/path_parser.cpp
+    core/file_sys/ticket.cpp
     core/hle/kernel/hle_ipc.cpp
+    core/hle/service/am.cpp
     core/memory/memory.cpp
     core/memory/vm_manager.cpp
     precompiled_headers.h

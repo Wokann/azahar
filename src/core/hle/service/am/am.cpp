@@ -4650,6 +4650,56 @@ void Module::Interface::ListTicketInfos(Kernel::HLERequestContext& ctx) {
     rb.Push(written);
 }
 
+void Module::Interface::GetRightsOnlyTicketData(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx);
+    const u32 buffer_size = rp.Pop<u32>();
+    const u64 title_id = rp.Pop<u64>();
+    const u64 ticket_id = rp.Pop<u64>();
+    auto& output_buffer = rp.PopMappedBuffer();
+
+    LOG_DEBUG(Service_AM, "buffer_size={}", buffer_size);
+
+    if (buffer_size > output_buffer.GetSize()) {
+        IPC::RequestBuilder rb = rp.MakeBuilder(2, 2);
+        rb.Push(Result(ErrorDescription::InvalidSize, ErrorModule::AM,
+                       ErrorSummary::InvalidArgument, ErrorLevel::Usage));
+        rb.Push<u32>(0);
+        rb.PushMappedBuffer(output_buffer);
+        return;
+    }
+
+    FileSys::Ticket ticket;
+    if (ticket.Load(title_id, ticket_id) != Loader::ResultStatus::Success ||
+        ticket.GetTitleID() != title_id || ticket.GetTicketID() != ticket_id) {
+        IPC::RequestBuilder rb = rp.MakeBuilder(2, 2);
+        rb.Push(Result(ErrorDescription::NotFound, ErrorModule::AM, ErrorSummary::InvalidState,
+                       ErrorLevel::Permanent));
+        rb.Push<u32>(0);
+        rb.PushMappedBuffer(output_buffer);
+        return;
+    }
+
+    // Export only the ticket, not any appended certificate chain. Keep its signed fields intact;
+    // neither title-key fixup nor the CDN export's encryption is needed for this command.
+    const auto ticket_data = ticket.Serialize();
+    const u32 ticket_size = static_cast<u32>(ticket_data.size());
+    if (ticket_data.size() > buffer_size) {
+        IPC::RequestBuilder rb = rp.MakeBuilder(2, 2);
+        rb.Push(Result(ErrorDescription::InvalidSize, ErrorModule::AM,
+                       ErrorSummary::InvalidArgument, ErrorLevel::Usage));
+        rb.Push(ticket_size);
+        rb.PushMappedBuffer(output_buffer);
+        return;
+    }
+
+    output_buffer.Write(ticket_data.data(), 0, ticket_data.size());
+
+    IPC::RequestBuilder rb = rp.MakeBuilder(2, 2);
+    rb.Push(ResultSuccess);
+    rb.Push(ticket_size);
+    rb.PushMappedBuffer(output_buffer);
+}
+
 void Module::Interface::GetNumCurrentContentInfos(Kernel::HLERequestContext& ctx) {
     IPC::RequestParser rp(ctx);
 

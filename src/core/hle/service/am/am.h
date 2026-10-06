@@ -1076,6 +1076,22 @@ public:
 
         void ListTicketInfos(Kernel::HLERequestContext& ctx);
 
+        /**
+         * AM::GetRightsOnlyTicketData service function
+         * Exports a license ticket without the wrapping used by ExportTicketWrapped.
+         *  Inputs:
+         *      0 : Command header (0x08210142)
+         *      1 : Output buffer size
+         *      2-3 : Title ID
+         *      4-5 : Ticket ID
+         *      6-7 : Mapped output buffer
+         *  Outputs:
+         *      1 : Result, 0 on success, otherwise error code
+         *      2 : Actual ticket size
+         *      3-4 : Mapped output buffer
+         */
+        void GetRightsOnlyTicketData(Kernel::HLERequestContext& ctx);
+
         void GetNumCurrentContentInfos(Kernel::HLERequestContext& ctx);
 
         void FindCurrentContentInfos(Kernel::HLERequestContext& ctx);
