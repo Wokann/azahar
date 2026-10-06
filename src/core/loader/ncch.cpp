@@ -3,6 +3,7 @@
 // Refer to the misc/licenses/gplv2.txt file included.
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -36,6 +37,46 @@ namespace Loader {
 using namespace Common::Literals;
 static constexpr u64 UPDATE_TID_HIGH = 0x0004000e00000000;
 static constexpr u64 DLP_CHILD_TID_HIGH = 0x0004000100000000;
+
+ResultStatus ConfigureCodeSet(Kernel::CodeSet& codeset, const ExHeader_CodeSetInfo& layout,
+                              std::vector<u8>& code) {
+    const u64 bss_size = (static_cast<u64>(layout.bss_size) + Memory::CITRA_PAGE_MASK) &
+                         ~static_cast<u64>(Memory::CITRA_PAGE_MASK);
+    const std::array segment_info{layout.text, layout.ro, layout.data};
+    const std::array<u64, 3> segment_sizes{
+        static_cast<u64>(layout.text.num_max_pages) * Memory::CITRA_PAGE_SIZE,
+        static_cast<u64>(layout.ro.num_max_pages) * Memory::CITRA_PAGE_SIZE,
+        static_cast<u64>(layout.data.num_max_pages) * Memory::CITRA_PAGE_SIZE + bss_size,
+    };
+    u64 image_size = 0;
+    for (std::size_t index = 0; index < segment_info.size(); ++index) {
+        const auto address = segment_info[index].address;
+        if ((address & Memory::CITRA_PAGE_MASK) != 0 || address >= Kernel::VMManager::MAX_ADDRESS ||
+            segment_sizes[index] > Kernel::VMManager::MAX_ADDRESS - address) {
+            LOG_ERROR(Loader, "Invalid NCCH codeset segment {}", index);
+            return ResultStatus::ErrorInvalidFormat;
+        }
+        image_size += segment_sizes[index];
+    }
+    // Preserve the previous .code + .bss allocation when it is larger than the header layout.
+    image_size = std::max(image_size, static_cast<u64>(code.size()) + bss_size);
+    if (image_size > Memory::FCRAM_N3DS_SIZE) {
+        LOG_ERROR(Loader, "NCCH codeset is too large: 0x{:X}", image_size);
+        return ResultStatus::ErrorInvalidFormat;
+    }
+
+    std::size_t offset = 0;
+    for (std::size_t index = 0; index < segment_info.size(); ++index) {
+        codeset.segments[index].offset = offset;
+        codeset.segments[index].addr = segment_info[index].address;
+        codeset.segments[index].size = static_cast<u32>(segment_sizes[index]);
+        offset += codeset.segments[index].size;
+    }
+    // A mod's exheader can reserve more pages than the original .code contains. IPS may write
+    // within those declared pages, but must still be rejected outside this allocated image.
+    code.resize(static_cast<std::size_t>(image_size), 0);
+    return ResultStatus::Success;
+}
 
 FileType AppLoader_NCCH::IdentifyType(FileUtil::IOFileBase* in_file) {
     u32 magic{};
@@ -139,29 +180,11 @@ ResultStatus AppLoader_NCCH::LoadExec(std::shared_ptr<Kernel::Process>& process)
 
         std::shared_ptr<CodeSet> codeset = system.Kernel().CreateCodeSet(process_name, program_id);
 
-        codeset->CodeSegment().offset = 0;
-        codeset->CodeSegment().addr = overlay_ncch->exheader_header.codeset_info.text.address;
-        codeset->CodeSegment().size =
-            overlay_ncch->exheader_header.codeset_info.text.num_max_pages * Memory::CITRA_PAGE_SIZE;
-
-        codeset->RODataSegment().offset =
-            codeset->CodeSegment().offset + codeset->CodeSegment().size;
-        codeset->RODataSegment().addr = overlay_ncch->exheader_header.codeset_info.ro.address;
-        codeset->RODataSegment().size =
-            overlay_ncch->exheader_header.codeset_info.ro.num_max_pages * Memory::CITRA_PAGE_SIZE;
-
-        // TODO(yuriks): Not sure if the bss size is added to the page-aligned .data size or just
-        //               to the regular size. Playing it safe for now.
-        u32 bss_page_size = (overlay_ncch->exheader_header.codeset_info.bss_size + 0xFFF) & ~0xFFF;
-        code.resize(code.size() + bss_page_size, 0);
-
-        codeset->DataSegment().offset =
-            codeset->RODataSegment().offset + codeset->RODataSegment().size;
-        codeset->DataSegment().addr = overlay_ncch->exheader_header.codeset_info.data.address;
-        codeset->DataSegment().size =
-            overlay_ncch->exheader_header.codeset_info.data.num_max_pages *
-                Memory::CITRA_PAGE_SIZE +
-            bss_page_size;
+        const auto layout_result =
+            ConfigureCodeSet(*codeset, overlay_ncch->exheader_header.codeset_info, code);
+        if (layout_result != ResultStatus::Success) {
+            return layout_result;
+        }
 
         // Apply patches now that the entire codeset (including .bss) has been allocated
         const ResultStatus patch_result = overlay_ncch->ApplyCodePatch(code);

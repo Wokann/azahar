@@ -61,6 +61,12 @@ DECLARE_ENUM_FLAG_OPERATORS(UnscheduleMode);
 
 enum class ProcessStatus { Created, Running, Exited };
 
+enum class ProcessMemoryOperation : u32 {
+    Map = 4,
+    Unmap = 5,
+    Protect = 6,
+};
+
 class ResourceLimit;
 struct MemoryRegionInfo;
 
@@ -233,6 +239,10 @@ public:
     Result Map(VAddr target, VAddr source, u32 size, VMAPermission perms, bool privileged = false);
     Result Unmap(VAddr target, VAddr source, u32 size, VMAPermission perms,
                  bool privileged = false);
+
+    /// Implements the memory operations exposed by svcControlProcessMemory.
+    Result ControlMemory(VAddr target, VAddr source, u32 size, ProcessMemoryOperation operation,
+                         u32 permissions);
 
     std::vector<std::shared_ptr<Kernel::Thread>> GetThreadList();
 

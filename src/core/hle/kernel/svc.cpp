@@ -424,6 +424,8 @@ private:
 
     Result ControlMemory(u32* out_addr, u32 addr0, u32 addr1, u32 size, u32 operation,
                          u32 permissions);
+    Result ControlProcessMemory(Handle process_handle, u32 addr0, u32 addr1, u32 size,
+                                u32 operation, u32 permissions);
     void ExitProcess();
     Result TerminateProcess(Handle handle);
     Result MapMemoryBlock(Handle handle, u32 addr, u32 permissions, u32 other_permissions);
@@ -575,6 +577,29 @@ Result SVC::ControlMemory(u32* out_addr, u32 addr0, u32 addr1, u32 size, u32 ope
         return ResultInvalidCombination;
     }
 
+    return ResultSuccess;
+}
+
+Result SVC::ControlProcessMemory(Handle process_handle, u32 addr0, u32 addr1, u32 size,
+                                 u32 operation, u32 permissions) {
+    LOG_DEBUG(Kernel_SVC,
+              "called process=0x{:08X}, addr0=0x{:08X}, addr1=0x{:08X}, size=0x{:X}, "
+              "operation=0x{:X}, permissions=0x{:X}",
+              process_handle, addr0, addr1, size, operation, permissions);
+
+    // Unlike other process SVCs, this one requires a real handle, not CurrentProcess.
+    const auto& handles = kernel.GetCurrentProcess()->handle_table;
+    R_UNLESS(handles.IsValid(process_handle), ResultInvalidHandle);
+    const auto process = handles.Get<Process>(process_handle);
+    R_UNLESS(process != nullptr, ResultInvalidHandle);
+    R_TRY(process->ControlMemory(addr0, addr1, size, static_cast<ProcessMemoryOperation>(operation),
+                                 permissions));
+
+    // Permissions and aliases may expose changed code at an address used by the JIT before.
+    system.InvalidateCacheRange(addr0, size);
+    if (operation != static_cast<u32>(ProcessMemoryOperation::Protect) && addr1 != addr0) {
+        system.InvalidateCacheRange(addr1, size);
+    }
     return ResultSuccess;
 }
 
@@ -2343,7 +2368,7 @@ const std::array<SVC::FunctionDef, 180> SVC::SVC_Table{{
     {0x6D, nullptr, "GetDebugThreadParam", 1000},
     {0x6E, nullptr, "Unknown", 1000},
     {0x6F, nullptr, "Unknown", 1000},
-    {0x70, nullptr, "ControlProcessMemory", 1000},
+    {0x70, &SVC::Wrap<&SVC::ControlProcessMemory, 0x70>, "ControlProcessMemory", 1000},
     {0x71, nullptr, "MapProcessMemory", 1000},
     {0x72, nullptr, "UnmapProcessMemory", 1000},
     {0x73, nullptr, "CreateCodeSet", 1000},

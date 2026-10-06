@@ -5,12 +5,21 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 #include "common/common_types.h"
 #include "common/swap.h"
 #include "core/file_sys/ncch_container.h"
 #include "core/loader/loader.h"
 
+namespace Kernel {
+class CodeSet;
+}
+
 namespace Loader {
+
+/// Configure the NCCH segments and allocate their zero-filled image before applying patches.
+ResultStatus ConfigureCodeSet(Kernel::CodeSet& codeset, const ExHeader_CodeSetInfo& layout,
+                              std::vector<u8>& code);
 
 /// Loads an NCCH file (e.g. from a CCI, or the first NCCH in a CXI)
 class AppLoader_NCCH final : public AppLoader {

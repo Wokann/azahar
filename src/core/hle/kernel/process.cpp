@@ -611,6 +611,71 @@ Result Process::Unmap(VAddr target, VAddr source, u32 size, VMAPermission perms,
     return ResultSuccess;
 }
 
+Result Process::ControlMemory(VAddr target, VAddr source, u32 size,
+                              ProcessMemoryOperation operation, u32 permissions) {
+    R_UNLESS((target & Memory::CITRA_PAGE_MASK) == 0 && (source & Memory::CITRA_PAGE_MASK) == 0,
+             ResultMisalignedAddress);
+    R_UNLESS((size & Memory::CITRA_PAGE_MASK) == 0, ResultMisalignedSize);
+    R_UNLESS(size != 0, ResultInvalidCombination);
+    R_UNLESS(target < VMManager::MAX_ADDRESS && size <= VMManager::MAX_ADDRESS - target,
+             ResultInvalidAddress);
+    R_UNLESS((permissions & ~static_cast<u32>(VMAPermission::ReadWriteExecute)) == 0 &&
+                 ((permissions & static_cast<u32>(VMAPermission::Write)) == 0 ||
+                  (permissions & static_cast<u32>(VMAPermission::Read)) != 0),
+             ResultInvalidCombination);
+
+    const auto perms = static_cast<VMAPermission>(permissions);
+    switch (operation) {
+    case ProcessMemoryOperation::Map:
+        R_UNLESS(source < VMManager::MAX_ADDRESS && size <= VMManager::MAX_ADDRESS - source,
+                 ResultInvalidAddress);
+        return Map(target, source, size, perms, true);
+    case ProcessMemoryOperation::Unmap: {
+        R_UNLESS(source < VMManager::MAX_ADDRESS && size <= VMManager::MAX_ADDRESS - source,
+                 ResultInvalidAddress);
+
+        // Validate both sides before removing anything. Matching backing addresses also allows
+        // unmapping a subrange after either VMA was split by a protection change.
+        u32 offset = 0;
+        while (offset < size) {
+            const auto target_vma = vm_manager.FindVMA(target + offset);
+            const auto source_vma = vm_manager.FindVMA(source + offset);
+            R_UNLESS(target_vma->second.type == VMAType::BackingMemory &&
+                         source_vma->second.type == VMAType::BackingMemory &&
+                         target_vma->second.meminfo_state == MemoryState::AliasCode,
+                     ResultInvalidAddressState);
+            if (target != source) {
+                R_UNLESS(source_vma->second.meminfo_state == MemoryState::Locked &&
+                             source_vma->second.permissions == VMAPermission::None,
+                         ResultInvalidAddressState);
+            }
+            const auto& dst = target_vma->second;
+            const auto& src = source_vma->second;
+            R_UNLESS(dst.backing_memory.GetPtr() + (target + offset - dst.base) ==
+                         src.backing_memory.GetPtr() + (source + offset - src.base),
+                     ResultInvalidAddressState);
+            offset += std::min({size - offset, dst.size - (target + offset - dst.base),
+                                src.size - (source + offset - src.base)});
+        }
+        return Unmap(target, source, size, perms, true);
+    }
+    case ProcessMemoryOperation::Protect: {
+        // Locked source pages must remain inaccessible until their alias is unmapped.
+        // HLE models the remaining states as ordinary backing memory; it does not model all
+        // kernel memory-block attributes used to restrict protection changes on hardware.
+        for (auto vma = vm_manager.FindVMA(target);
+             vma != vm_manager.vma_map.end() && vma->second.base < target + size; ++vma) {
+            R_UNLESS(vma->second.type == VMAType::BackingMemory &&
+                         vma->second.meminfo_state != MemoryState::Locked,
+                     ResultInvalidAddressState);
+        }
+        return vm_manager.ReprotectRange(target, size, perms);
+    }
+    default:
+        return ResultInvalidCombination;
+    }
+}
+
 std::vector<std::shared_ptr<Kernel::Thread>> Kernel::Process::GetThreadList() {
     std::vector<std::shared_ptr<Kernel::Thread>> ret;
     for (u32 core = 0; core < Core::GetNumCores(); core++) {
